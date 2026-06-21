@@ -38,9 +38,10 @@ RUN mkdir -p /app/data /app/dataset
 # Maven, the JDK, or source code is present in the final image
 COPY --from=build /build/target/*.jar app.jar
 
-# (9) Copy the dataset into the image (also could be a mounted volume)
-COPY dataset/queries.csv /app/dataset/queries.csv
-COPY dataset/sample_queries.csv /app/dataset/sample_queries.csv
+# (9) The dataset lives at the repo root (not under backend/, which is this
+# build context), so it is provided at runtime via a read-only bind mount
+# declared in docker-compose.yml — see the backend service's volumes.
+# /app/dataset is created above in step (7).
 
 # (10) Document which port this container listens on
 EXPOSE 8080

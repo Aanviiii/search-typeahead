@@ -15,6 +15,9 @@ services:
       # (1) Persist the SQLite database file outside the container
       # so data survives container restarts/rebuilds
       - typeahead-db-data:/app/data
+      # (1b) Provide the dataset (lives at the repo root) read-only.
+      # The DataLoader reads /app/dataset/queries.csv on startup.
+      - ../dataset:/app/dataset:ro
     environment:
       - SPRING_PROFILES_ACTIVE=docker
     healthcheck:
