@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  # ─────────────────────────────────────────────
+  # BACKEND SERVICE
+  # ─────────────────────────────────────────────
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: typeahead-backend
+    ports:
+      - "8080:8080"
+    volumes:
+      # (1) Persist the SQLite database file outside the container
+      # so data survives container restarts/rebuilds
+      - typeahead-db-data:/app/data
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    healthcheck:
+      test: [ "CMD", "wget", "--spider", "-q", "http://localhost:8080/trending" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    networks:
+      - typeahead-network
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────
+  # FRONTEND SERVICE
+  # ─────────────────────────────────────────────
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: typeahead-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      # (2) Wait for backend to be HEALTHY (not just started) before
+      # starting frontend — prevents frontend serving before backend
+      # is actually ready to respond
+      backend:
+        condition: service_healthy
+    networks:
+      - typeahead-network
+    restart: unless-stopped
+
+# ─────────────────────────────────────────────
+# NAMED VOLUME — persists DB across container recreation
+# ─────────────────────────────────────────────
+volumes:
+  typeahead-db-data:
+    driver: local
+
+# ─────────────────────────────────────────────
+# CUSTOM NETWORK — enables service-name DNS resolution
+# (e.g., frontend's Nginx can reach "http://backend:8080")
+# ─────────────────────────────────────────────
+networks:
+  typeahead-network:
+    driver: bridge

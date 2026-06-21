@@ -1,0 +1,210 @@
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #f4f6f8;
+    color: #1a1a1a;
+}
+
+.app-container {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 40px 20px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.app-header {
+    text-align: center;
+    margin-bottom: 32px;
+}
+
+.app-header h1 {
+    font-size: 28px;
+    margin-bottom: 8px;
+}
+
+.app-subtitle {
+    color: #666;
+    font-size: 14px;
+}
+
+.app-main {
+    flex: 1;
+}
+
+/* ── Search Box ── */
+.search-box-container {
+    position: relative;
+    margin-bottom: 24px;
+}
+
+.search-input-row {
+    display: flex;
+    gap: 8px;
+}
+
+.search-input {
+    flex: 1;
+    padding: 12px 16px;
+    font-size: 16px;
+    border: 2px solid #ddd;
+    border-radius: 8px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.search-input:focus {
+    border-color: #2980b9;
+}
+
+.search-button {
+    padding: 12px 24px;
+    font-size: 16px;
+    background: #2980b9;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background 0.2s;
+}
+
+.search-button:hover {
+    background: #2471a3;
+}
+
+/* ── Status Messages ── */
+.status-message {
+    margin-top: 8px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 14px;
+}
+
+.status-message.loading {
+    background: #eef6fc;
+    color: #2980b9;
+}
+
+.status-message.error {
+    background: #fdecea;
+    color: #c0392b;
+}
+
+.status-message.no-results {
+    background: #f9f9f9;
+    color: #888;
+}
+
+.cache-indicator {
+    margin-top: 8px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.cache-indicator.hit {
+    color: #27ae60;
+}
+
+.cache-indicator.miss {
+    color: #e67e22;
+}
+
+/* ── Dropdown ── */
+.suggestion-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 90px;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    list-style: none;
+    z-index: 10;
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+.suggestion-item {
+    padding: 10px 16px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.suggestion-item:hover,
+.suggestion-item.highlighted {
+    background: #eef6fc;
+}
+
+/* ── Status Banner ── */
+.status-banner {
+    margin: 16px 0;
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.status-banner.success {
+    background: #eafaf1;
+    color: #27ae60;
+    border: 1px solid #27ae60;
+}
+
+.status-banner.error {
+    background: #fdecea;
+    color: #c0392b;
+    border: 1px solid #c0392b;
+}
+
+/* ── Trending Section ── */
+.trending-section {
+    margin-top: 32px;
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.trending-section h3 {
+    margin-bottom: 16px;
+    font-size: 18px;
+}
+
+.trending-list {
+    list-style: decimal;
+    padding-left: 20px;
+}
+
+.trending-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid #f0f0f0;
+    font-size: 14px;
+}
+
+.trending-query {
+    font-weight: 500;
+    text-transform: capitalize;
+}
+
+.trending-score {
+    color: #888;
+    font-size: 12px;
+}
+
+/* ── Footer ── */
+.app-footer {
+    text-align: center;
+    margin-top: 40px;
+    font-size: 12px;
+    color: #999;
+}
