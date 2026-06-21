@@ -11,9 +11,8 @@ import org.springframework.stereotype.Service;
 import java.io.FileReader;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
+import java.util.Optional;
 
 @Service
 public class DataLoaderService {
@@ -36,29 +35,15 @@ public class DataLoaderService {
 
     // (1) Load dataset from CSV file
     // Called once at startup by DataLoaderConfig
-    //
-    // OPTIMIZED FOR BULK/FRESH LOAD:
-    // No per-row DB existence check (224K individual SELECTs was the
-    // bottleneck — took 10+ minutes). Instead, we deduplicate in-memory
-    // using a HashSet (O(1) lookup, no DB round trip), then bulk-insert.
-    // This is correct because this method is only ever called once at
-    // startup against what should be an empty/fresh table — there's
-    // nothing to "find existing" against yet. The DB's UNIQUE constraint
-    // on the `query` column is the final safety net if this assumption
-    // is ever violated.
     public void loadFromCsv(String csvPath) {
         System.out.println("[DataLoader] Loading dataset from: " + csvPath);
         long start = System.currentTimeMillis();
 
         int loaded = 0;
         int skipped = 0;
-        int duplicates = 0;
-
-        Set<String> seenInThisLoad = new HashSet<>();
         List<Query> batch = new ArrayList<>();
 
         try (CSVReader reader = new CSVReader(new FileReader(csvPath))) {
-            String[] header = reader.readNext(); // (2) Skip header row
             String[] line;
 
             while ((line = reader.readNext()) != null) {
@@ -76,30 +61,28 @@ public class DataLoaderService {
                         continue;
                     }
 
-                    // (3) In-memory duplicate check — O(1), no DB hit
-                    if (!seenInThisLoad.add(queryText)) {
-                        duplicates++;
-                        continue;
+                    // (3) Check if query already exists in DB
+                    Optional<Query> existing = queryRepository.findByQueryIgnoreCase(queryText);
+
+                    if (existing.isPresent()) {
+                        // (4) Update Trie with existing score
+                        Query q = existing.get();
+                        trieService.insert(queryText,
+                                q.getTrendingScore(historicalWeight, recentWeight));
+                    } else {
+                        // (5) Add to batch for bulk insert
+                        batch.add(new Query(queryText, count));
                     }
 
-                    // (4) Queue for bulk insert
-                    batch.add(new Query(queryText, count));
                     loaded++;
 
-                    // (5) Insert into Trie immediately — independent of DB batching
-                    trieService.insert(queryText,
-                            new Query(queryText, count)
-                                    .getTrendingScore(historicalWeight, recentWeight));
-
-                    // (6) Flush to DB every 2000 records to bound memory
-                    // and give periodic progress feedback
-                    if (batch.size() >= 2000) {
+                    // (6) Batch save every 1000 records
+                    if (batch.size() >= 1000) {
                         queryRepository.saveAll(batch);
+                        batch.forEach(q -> trieService.insert(
+                                q.getQuery(),
+                                q.getTrendingScore(historicalWeight, recentWeight)));
                         batch.clear();
-                        if (loaded % 20000 < 2000) {
-                            System.out.println("[DataLoader] Progress: "
-                                    + loaded + " rows loaded so far...");
-                        }
                     }
 
                 } catch (NumberFormatException e) {
@@ -107,9 +90,12 @@ public class DataLoaderService {
                 }
             }
 
-            // (7) Save any remaining records
+            // (7) Save remaining records
             if (!batch.isEmpty()) {
                 queryRepository.saveAll(batch);
+                batch.forEach(q -> trieService.insert(
+                        q.getQuery(),
+                        q.getTrendingScore(historicalWeight, recentWeight)));
             }
 
         } catch (IOException | CsvValidationException e) {
@@ -119,7 +105,7 @@ public class DataLoaderService {
 
         long elapsed = System.currentTimeMillis() - start;
         System.out.printf(
-                "[DataLoader] Done: %d loaded, %d skipped, %d duplicates removed in %dms. Trie size: %d%n",
-                loaded, skipped, duplicates, elapsed, trieService.size());
+                "[DataLoader] Done: %d loaded, %d skipped in %dms. Trie size: %d%n",
+                loaded, skipped, elapsed, trieService.size());
     }
 }
