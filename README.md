@@ -7,6 +7,14 @@ Spring Boot backend, packaged to run with Docker Compose.
 
 ---
 
+## Demo
+
+> **📹 Demo video:** _<!-- TODO: add link to demo video here (e.g. YouTube / Loom / Drive) -->_ **(to be added)**
+
+<!-- TODO: add screenshots of the search box, suggestion dropdown, and trending section here -->
+
+---
+
 ## Features
 
 - **Prefix suggestions** served from an in‑memory **trie**, ranked by a trending score.
@@ -193,6 +201,129 @@ Key settings in [`backend/src/main/resources/application.properties`](backend/sr
 | `app.batch.max-queue-size`        | `10000` | Max queued searches before back‑pressure  |
 
 **Trending score** = `historicalWeight × historicalCount + recentWeight × recentCount`.
+
+---
+
+## Performance Report
+
+Measured against the running Docker deployment (dataset of ~224K queries loaded).
+The numbers below are reproducible with the steps in each subsection.
+
+### Suggestion latency
+
+`GET /suggest` returns a server-measured `latencyMs` field. Over 200 warm requests
+across 20 distinct prefixes:
+
+| Metric | Value |
+| ------ | ----- |
+| p50 (server-side) | **0 ms** |
+| p95 (server-side) | **1 ms** |
+| p99 (server-side) | **1 ms** |
+| max (server-side) | 1 ms |
+| End-to-end (incl. network + client overhead) | ~8 ms |
+
+Low latency comes from serving suggestions out of the **in-memory trie** (and the
+cache in front of it) — a suggestion request performs **zero database reads** in the
+steady state. *Reproduce:* hit `GET /suggest?q=<prefix>` repeatedly and read the
+`latencyMs` field.
+
+### Cache hit rate
+
+Consistent-hash-routed cache with a 60 s TTL. In a controlled run — 20 prefixes
+requested cold once (misses) then repeatedly (hits):
+
+| Requests | Hits | Misses | Hit ratio |
+| -------- | ---- | ------ | --------- |
+| 221      | 201  | 20     | **0.91**  |
+
+*Reproduce:* `GET /cache/stats` before and after a batch of repeated `/suggest`
+calls and compare the `TOTAL` hits/misses; `GET /cache/debug?prefix=<p>` shows the
+node a prefix routes to.
+
+### Write reduction (batch writes)
+
+Searches are buffered and **aggregated by query**, then flushed to the DB on a 10 s
+timer — so DB writes scale with the number of *distinct* queries per window, not the
+number of requests. In a controlled run of **300** `POST /search` requests spread
+across **10** distinct queries:
+
+```
+[Batch] Flushing 10 unique queries to DB
+[Batch] Flush complete: 10/10 queries written
+```
+
+→ **300 search requests collapsed to ~10 DB writes** ≈ **97% fewer writes** for that
+window (higher under heavier repeat traffic). *Reproduce:* send repeated `POST /search`
+calls and watch `docker compose logs -f backend` for the `[Batch] Flushing N unique`
+lines.
+
+### DB read/write summary
+
+| Operation        | DB reads          | DB writes                          |
+| ---------------- | ----------------- | ---------------------------------- |
+| `GET /suggest`   | 0 (trie + cache)  | 0                                  |
+| `POST /search`   | 0 (enqueue only)  | 0 synchronously (batched later)    |
+| Batch flush      | 1 per distinct query | 1 per distinct query per window |
+| `GET /trending`  | 1 (top-N query)   | 0                                  |
+
+---
+
+## Design Decisions & Trade-offs
+
+### Data storage
+Query-count data lives in **SQLite** via Spring Data JPA. It's a single-file embedded
+DB — trivial to run locally and persisted in a Docker volume — which fits the
+assignment's "reliable enough for the demo" bar. The trade-off is that SQLite is
+single-writer and doesn't scale horizontally; a production system would use a
+networked store (Postgres/Redis/DynamoDB). The `id` uses a sequence/table generator
+rather than `IDENTITY` because the SQLite JDBC driver doesn't support the
+`getGeneratedKeys` path `IDENTITY` requires.
+
+### Suggestions: trie + cache
+Suggestions are served from an **in-memory trie** keyed by character: walking a prefix
+is `O(L)` in the prefix length, and a bounded **min-heap** keeps the top-10 by score
+while collecting matches. A **distributed cache** sits in front (`cache → trie`), so
+repeated prefixes skip the trie walk entirely. This is why p95 latency is ~1 ms and
+suggestion reads never touch the DB.
+
+### Distributed cache + consistent hashing
+The cache is split across **3 logical nodes**. A **consistent-hash ring** with **150
+virtual nodes per physical node** decides which node owns a prefix key, so adding or
+removing a node remaps only a small fraction of keys (vs. a plain `hash % N` that
+remaps almost everything). Entries expire via a **60 s TTL** and a sweeper, so stale
+suggestions don't live forever. `GET /cache/debug?prefix=` exposes the routing for
+inspection.
+
+### Trending: recency-aware ranking
+The trending score is `0.7 × historicalCount + 0.3 × recentCount`:
+- **How recent searches are tracked** — each search increments both the all-time
+  `historicalCount` and a `recentCount` for the query.
+- **How recency affects ranking** — `recentCount` is weighted into the score, so a
+  query getting searched *now* rises above an equally-historical-but-quiet query.
+- **Avoiding permanent over-ranking** — a scheduled job **resets `recentCount` to 0**
+  for queries not searched in the last hour, so a brief spike decays instead of
+  sticking forever.
+- **Cache invalidation when rankings change** — when a search is flushed, the batch
+  writer **invalidates every cached prefix of that query**, so the next lookup
+  recomputes from the updated trie.
+- **Basic vs. enhanced** — setting `app.trending.recent-weight=0` reduces this to the
+  basic "overall count" ranking, which is how the two modes can be compared.
+- **Trade-off** — freshness vs. latency vs. complexity: counts are kept approximate
+  (batched, TTL-cached) to keep reads fast, accepting that rankings update within a
+  flush/TTL window rather than instantly.
+
+### Batch writes
+`POST /search` does **not** write to the DB synchronously. It enqueues the query in an
+in-memory map that **aggregates repeats** (`query → count`); a scheduler flushes every
+10 s, doing one upsert per distinct query and then updating the trie score and
+invalidating affected cache prefixes.
+- **Write reduction** — see the Performance Report (≈97% in the sample run).
+- **Failure trade-off** — the queue is in-memory, so **if the process crashes before a
+  flush, the un-flushed increments in that window are lost.** This is an intentional
+  trade: search counts are popularity signals, not transactional data, so losing a few
+  seconds of increments is acceptable in exchange for low write amplification and fast
+  responses. A production system would use a durable log (e.g. Kafka/WAL) if the counts
+  had to survive crashes exactly.
 
 ---
 
