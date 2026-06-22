@@ -7,6 +7,13 @@ Spring Boot backend, packaged to run with Docker Compose.
 
 ---
 
+## Project report
+
+📄 **Full project report:** [`REPORT.md`](REPORT.md) — architecture (with diagrams), dataset
+source & loading, API documentation, design choices & trade-offs, and the performance report.
+
+---
+
 ## Demo
 
 > **📹 Demo video:** _<!-- TODO: add link to demo video here (e.g. YouTube / Loom / Drive) -->_ **(to be added)**
