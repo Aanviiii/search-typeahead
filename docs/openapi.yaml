@@ -1,0 +1,265 @@
+openapi: 3.0.3
+info:
+  title: Search Typeahead API
+  version: 1.0.0
+  description: >
+    REST API for the Search Typeahead System. Provides prefix suggestions
+    (served from an in-memory trie via a distributed-cache layer), search
+    recording (batched asynchronously), trending queries, and cache
+    diagnostics. This document is hand-written and matches the Spring Boot
+    controllers exactly.
+servers:
+  - url: /api
+    description: Through the frontend (nginx / Vite strips the /api prefix and proxies to the backend)
+  - url: http://localhost:8080
+    description: Directly against the backend
+
+paths:
+  /suggest:
+    get:
+      operationId: getSuggestions
+      summary: Get prefix suggestions
+      description: >
+        Returns up to the top suggestions whose text starts with the given
+        prefix, ranked by trending score. Looks up the distributed cache
+        first, then the trie on a miss. An empty or blank prefix yields an
+        empty suggestion list.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: The prefix to autocomplete. Defaults to an empty string.
+          schema:
+            type: string
+            default: ""
+          example: nikon
+      responses:
+        "200":
+          description: Suggestions for the prefix
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuggestResponse"
+              example:
+                suggestions:
+                  - nikon
+                  - nikon tablet
+                  - nikon chair
+                prefix: nikon
+                cacheHit: false
+                latencyMs: 2
+                count: 3
+
+  /search:
+    post:
+      operationId: recordSearch
+      summary: Record a search
+      description: >
+        Records that a query was searched. The write is enqueued and flushed
+        to the database asynchronously by the batch writer, so this returns
+        immediately.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchRequest"
+            example:
+              query: nikon
+      responses:
+        "200":
+          description: Search recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+              example:
+                message: Searched
+        "400":
+          description: The query field is missing or blank
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: query is required
+
+  /trending:
+    get:
+      operationId: getTrending
+      summary: Get trending queries
+      description: >
+        Returns the top trending queries ordered by trending score
+        (historical-weight * historicalCount + recent-weight * recentCount).
+      responses:
+        "200":
+          description: Trending queries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrendingResponse"
+              example:
+                trending:
+                  - query: the
+                    score: 73903.9
+                    historicalCount: 105577
+                    recentCount: 0
+
+  /cache/debug:
+    get:
+      operationId: getCacheDebug
+      summary: Cache routing/debug info for a prefix
+      description: >
+        Shows which cache node a prefix routes to (via consistent hashing),
+        whether it is currently cached, its remaining TTL, and per-node
+        hit/miss statistics.
+      parameters:
+        - name: prefix
+          in: query
+          required: false
+          description: The prefix to inspect. Defaults to an empty string.
+          schema:
+            type: string
+            default: ""
+          example: nikon
+      responses:
+        "200":
+          description: Cache debug info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CacheDebugInfo"
+              example:
+                prefix: nikon
+                nodeId: Node-0
+                hit: true
+                ttlRemaining: 57
+                keyHash: 3683164197
+                nodeHits: 12
+                nodeMisses: 4
+                hitRatio: 0.75
+
+  /cache/stats:
+    get:
+      operationId: getCacheStats
+      summary: Aggregate cache statistics
+      description: >
+        Returns a plain-text summary of per-node cache statistics (size,
+        hits, misses, ratio) followed by a TOTAL line. This endpoint returns
+        text, not JSON.
+      responses:
+        "200":
+          description: Plain-text cache statistics across all nodes
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: |
+                Node-0: size=120 hits=300 misses=80 ratio=0.79
+                Node-1: size=98 hits=210 misses=60 ratio=0.78
+                Node-2: size=110 hits=250 misses=70 ratio=0.78
+                TOTAL: hits=760 misses=210 ratio=0.78
+
+components:
+  schemas:
+    SuggestResponse:
+      type: object
+      properties:
+        suggestions:
+          type: array
+          items:
+            type: string
+          description: Suggested queries, ranked by trending score.
+        prefix:
+          type: string
+          description: The normalised (lower-cased, trimmed) prefix that was searched.
+        cacheHit:
+          type: boolean
+          description: Whether the result was served from the distributed cache.
+        latencyMs:
+          type: integer
+          format: int64
+          description: Server-side handling time in milliseconds.
+        count:
+          type: integer
+          description: Number of suggestions returned.
+      required: [suggestions, prefix, cacheHit, latencyMs, count]
+
+    SearchRequest:
+      type: object
+      properties:
+        query:
+          type: string
+          description: The query that was searched.
+      required: [query]
+
+    SearchResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          enum: [Searched]
+      required: [message]
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+
+    TrendingResponse:
+      type: object
+      properties:
+        trending:
+          type: array
+          items:
+            $ref: "#/components/schemas/TrendingItem"
+      required: [trending]
+
+    TrendingItem:
+      type: object
+      properties:
+        query:
+          type: string
+        score:
+          type: number
+          format: double
+          description: Weighted trending score.
+        historicalCount:
+          type: integer
+          format: int64
+        recentCount:
+          type: integer
+          format: int64
+      required: [query, score, historicalCount, recentCount]
+
+    CacheDebugInfo:
+      type: object
+      properties:
+        prefix:
+          type: string
+        nodeId:
+          type: string
+          description: The cache node the prefix routes to.
+        hit:
+          type: boolean
+          description: Whether the prefix is currently cached on that node.
+        ttlRemaining:
+          type: integer
+          format: int64
+          description: Seconds until the cached entry expires (0 when not cached).
+        keyHash:
+          type: integer
+          format: int64
+          description: The consistent-hash value of the prefix.
+        nodeHits:
+          type: integer
+          format: int64
+        nodeMisses:
+          type: integer
+          format: int64
+        hitRatio:
+          type: number
+          format: double
+      required: [prefix, nodeId, hit, ttlRemaining, keyHash, nodeHits, nodeMisses, hitRatio]

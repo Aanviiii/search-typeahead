@@ -120,6 +120,20 @@ backend on `:8080` (the `/api` prefix is stripped before forwarding).
 
 ---
 
+## API Documentation
+
+Interactive API docs (Swagger UI) are served by the frontend at:
+
+**http://localhost:3000/api-docs**
+
+The UI is rendered from the hand-written OpenAPI 3.0 spec at
+[`docs/openapi.yaml`](docs/openapi.yaml) and supports "Try it out" — requests go
+through the `/api` server entry, which the frontend proxies to the backend. The
+spec is also bundled into the frontend (`frontend/public/openapi.yaml`) so it
+serves identically in local dev and the Docker build.
+
+---
+
 ## API reference
 
 Base URL: `http://localhost:8080` (or `http://localhost:3000/api` via the frontend proxy).
