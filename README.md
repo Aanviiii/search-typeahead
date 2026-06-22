@@ -16,9 +16,7 @@ source & loading, API documentation, design choices & trade-offs, and the perfor
 
 ## Demo
 
-> **📹 Demo video:** _<!-- TODO: add link to demo video here (e.g. YouTube / Loom / Drive) -->_ **(to be added)**
-
-<!-- TODO: add screenshots of the search box, suggestion dropdown, and trending section here -->
+> **📹 Demo video:** https://drive.google.com/file/d/13J7tbIWqxrwEO8TdhvfPojlA98hvt9sp/view?usp=sharing
 
 ---
 
